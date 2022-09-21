@@ -343,6 +343,10 @@ contract MultiSigWallet {
         return owners;
     }
 
+    function getBalance() public constant returns(uint) {
+        return address(this).balance;
+    }
+
     /// @dev Returns array with owner addresses, which confirmed transaction.
     /// @param transactionId Transaction ID.
     /// @return Returns array of owner addresses.
