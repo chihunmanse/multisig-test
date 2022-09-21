@@ -16,19 +16,20 @@ describe("Gnosis Test", () => {
     owner3: SignerWithAddress,
     owner4: SignerWithAddress,
     notOwner: SignerWithAddress,
-    newOwner: SignerWithAddress;
+    newOwner: SignerWithAddress,
+    receiver: SignerWithAddress;
 
   let multisig: Contract, erc721: Contract, tx: TX;
 
   before(async () => {
-    [owner1, owner2, owner3, owner4, notOwner, newOwner] =
+    [owner1, owner2, owner3, owner4, notOwner, newOwner, receiver] =
       await ethers.getSigners();
     console.log("Deploying contracts with the account: " + owner1.address);
 
     const MultiSigWallet = await ethers.getContractFactory("MultiSigWallet");
     multisig = await MultiSigWallet.deploy(
       [owner1.address, owner2.address, owner3.address, owner4.address],
-      2
+      3 // required 3
     );
     await multisig.deployed();
     console.log(`MultiSigWallet deployed to: ${multisig.address}`);
@@ -39,18 +40,18 @@ describe("Gnosis Test", () => {
   });
 
   describe("Transaction", () => {
-    it("transfer ether : success", async () => {
+    it("submitTransaction 0 : success : transfer ether", async () => {
       const sendEtherTx = await owner1.sendTransaction({
         to: multisig.address,
         value: ethers.utils.parseEther("1"),
       });
       await sendEtherTx.wait();
 
-      const multisigBalance1 = await multisig.getBalance();
-      expect(multisigBalance1).to.equal(ethers.utils.parseEther("1"));
+      const multisigBalance = await multisig.getBalance();
+      expect(multisigBalance).to.equal(ethers.utils.parseEther("1"));
 
       tx = {
-        destination: notOwner.address,
+        destination: receiver.address,
         value: ethers.utils.parseEther("1"),
         data: "0x",
       };
@@ -61,21 +62,90 @@ describe("Gnosis Test", () => {
       await submitTx.wait();
 
       const newTx = await multisig.transactions(0);
-      expect(newTx.destination).to.equal(notOwner.address);
-
-      const submitTx2 = await multisig.connect(owner2).confirmTransaction(0);
-      await submitTx2.wait();
-
-      await expect(submitTx2).to.emit(multisig, "Execution").withArgs("0");
-
-      const multisigBalance2 = await multisig.getBalance();
-      expect(multisigBalance2).to.equal("0");
-
-      const notOnwerBalance = await notOwner.getBalance();
-      expect(notOnwerBalance).to.equal(ethers.utils.parseEther("101"));
+      expect(newTx.destination).to.equal(receiver.address);
     });
 
-    it("contract call : success", async () => {
+    it("submitTransaction : failed : not owner", async () => {
+      tx = {
+        destination: receiver.address,
+        value: ethers.utils.parseEther("1"),
+        data: "0x",
+      };
+
+      const submitTx = multisig
+        .connect(notOwner)
+        .submitTransaction(tx.destination, tx.value, tx.data);
+
+      await expect(submitTx).to.revertedWithoutReason();
+    });
+
+    it("submitTransaction : failed : destination is null address", async () => {
+      tx = {
+        destination: "0x0000000000000000000000000000000000000000",
+        value: ethers.utils.parseEther("1"),
+        data: "0x",
+      };
+
+      const submitTx = multisig
+        .connect(owner1)
+        .submitTransaction(tx.destination, tx.value, tx.data);
+
+      await expect(submitTx).to.revertedWithoutReason();
+    });
+
+    it("revokeConfirmation tx 0 : success", async () => {
+      const revokeTx = await multisig.connect(owner1).revokeConfirmation(0);
+
+      await expect(revokeTx)
+        .to.emit(multisig, "Revocation")
+        .withArgs(owner1.address, 0);
+    });
+
+    it("revokeConfirmation tx 0 : failed : not owner", async () => {
+      const revokeTx = multisig.connect(notOwner).revokeConfirmation(0);
+
+      await expect(revokeTx).to.revertedWithoutReason();
+    });
+
+    it("revokeConfirmation tx 0 : failed : not confirmation", async () => {
+      const revokeTx = multisig.connect(owner1).revokeConfirmation(0);
+
+      await expect(revokeTx).to.revertedWithoutReason();
+    });
+
+    it("confirmTransaction tx 0 : success", async () => {
+      const confirmTx = await multisig.connect(owner2).confirmTransaction(0);
+
+      await expect(confirmTx)
+        .to.emit(multisig, "Confirmation")
+        .withArgs(owner2.address, 0);
+
+      const confirmCount = await multisig.getConfirmationCount(0);
+      expect(confirmCount).to.equal(1);
+    });
+
+    it("excuteTransaction tx 0 : success", async () => {
+      await multisig.connect(owner1).confirmTransaction(0);
+      const lastConfirmTx = await multisig
+        .connect(owner3)
+        .confirmTransaction(0);
+
+      await expect(lastConfirmTx).to.emit(multisig, "Execution").withArgs("0");
+
+      const multisigBalance = await multisig.getBalance();
+      expect(multisigBalance).to.equal("0");
+
+      const receiverBalance = await receiver.getBalance();
+      expect(receiverBalance).to.equal(ethers.utils.parseEther("101"));
+    });
+
+    it("revokeConfirmation tx 0 : failed : already excute", async () => {
+      const revokeTx = multisig.connect(owner1).revokeConfirmation(0);
+
+      await expect(revokeTx).to.revertedWithoutReason();
+    });
+
+    it("excuteTransaction tx 1 : contract call : success", async () => {
       const encodeData = erc721.interface.encodeFunctionData("mint", [
         notOwner.address,
       ]);
@@ -94,16 +164,21 @@ describe("Gnosis Test", () => {
       const newTx = await multisig.transactions(1);
       expect(newTx.destination).to.equal(erc721.address);
 
-      const submitTx2 = await multisig.connect(owner2).confirmTransaction(1);
-      await submitTx2.wait();
+      const confirmTx = await multisig.connect(owner2).confirmTransaction(1);
+      await confirmTx.wait();
 
-      await expect(submitTx2).to.emit(multisig, "Execution").withArgs("1");
+      const lastConfirmTx = await multisig
+        .connect(owner3)
+        .confirmTransaction(1);
+      await lastConfirmTx.wait();
+
+      await expect(lastConfirmTx).to.emit(multisig, "Execution").withArgs("1");
 
       const tokenOnwer = await erc721.ownerOf(1);
       expect(tokenOnwer).to.equal(notOwner.address);
     });
 
-    it("add owner : success", async () => {
+    it("excuteTransaction tx 2 : add owner : success", async () => {
       const encodeData = multisig.interface.encodeFunctionData("addOwner", [
         newOwner.address,
       ]);
@@ -122,10 +197,18 @@ describe("Gnosis Test", () => {
       const newTx = await multisig.transactions(2);
       expect(newTx.destination).to.equal(multisig.address);
 
-      const submitTx2 = await multisig.connect(owner2).confirmTransaction(2);
-      await submitTx2.wait();
+      const confirmTx = await multisig.connect(owner2).confirmTransaction(2);
+      await confirmTx.wait();
 
-      await expect(submitTx2).to.emit(multisig, "Execution").withArgs("2");
+      const lastConfirmTx = await multisig
+        .connect(owner3)
+        .confirmTransaction(2);
+      await lastConfirmTx.wait();
+
+      await expect(lastConfirmTx).to.emit(multisig, "Execution").withArgs("2");
+      await expect(lastConfirmTx)
+        .to.emit(multisig, "OwnerAddition")
+        .withArgs(newOwner.address);
 
       const isOwner = await multisig.isOwner(newOwner.address);
       expect(isOwner).to.equal(true);
