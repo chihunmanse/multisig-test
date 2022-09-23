@@ -17,6 +17,7 @@ interface IMultisigWallet {
     event ConfirmTransaction(address indexed owner, uint256 indexed txId);
     event RevokeConfirmation(address indexed owner, uint256 indexed txId);
     event ExecuteTransaction(address indexed owner, uint256 indexed txId);
+    event FailedTransaction(address indexed owner, uint256 indexed txId);
     event OwnerAdded(address indexed owner);
     event OwnerRemoved(address indexed owner);
     event TxRequirementChanged(uint256 txRequirement);
@@ -33,7 +34,6 @@ interface IMultisigWallet {
     error DoesNotExistOwner();
     error CanNotExecuteTx();
     error DoesNotConfirmedTx();
-    error FailedTx();
     error InvalidOwner();
     error InvalidOwnerCount();
     error InvalidTxRequirement();

@@ -5,8 +5,8 @@ pragma solidity ^0.8.9;
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
-import {Counters} from "@openzeppelin/contracts/utils/Counters.sol"
-import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol"
+import {Counters} from "@openzeppelin/contracts/utils/Counters.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import {IMultisigWallet} from "./IMultisigWallet.sol";
 
@@ -149,11 +149,13 @@ contract MultisigWallet2 is IMultisigWallet, IERC721Receiver, IERC1155Receiver {
         (bool success, ) = transaction.to.call{value: transaction.value}(
             transaction.data
         );
-        if (!success) {
-            revert FailedTx();
-        }
 
-        emit ExecuteTransaction(msg.sender, _txId);
+        if (success) {
+            emit ExecuteTransaction(msg.sender, _txId);
+        } else {
+            transaction.executed = false;
+            emit FailedTransaction(msg.sender, _txId);
+        }
     }
 
     function revokeConfirmation(uint256 _txId)
@@ -183,10 +185,6 @@ contract MultisigWallet2 is IMultisigWallet, IERC721Receiver, IERC1155Receiver {
 
         if (ownerCount > MAX_OWNER_COUNT) {
             revert InvalidOwnerCount();
-        }
-
-        if (!_isValidTxRequirement(txRequirement, ownerCount)) {
-            revert InvalidTxRequirement();
         }
 
         if (isOwner(_owner)) {
