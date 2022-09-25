@@ -3,6 +3,6 @@
 # Multisig Wallet Test
 
 ```shell
-npm install
-npx hardhat test
+1. npm install
+2. npx hardhat test
 ```
