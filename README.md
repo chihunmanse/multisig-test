@@ -2,7 +2,12 @@
 
 # Multisig Wallet Test
 
+1. 
 ```shell
-1. npm install
-2. npx hardhat test
+npm install
+```
+
+2. 
+```shell
+npx hardhat test
 ```
