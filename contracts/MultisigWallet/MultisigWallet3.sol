@@ -8,16 +8,11 @@ import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Recei
 import {Counters} from "@openzeppelin/contracts/utils/Counters.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-import {IMultisigWallet2} from "./IMultisigWallet2.sol";
+import {IMultisigWallet3} from "./IMultisigWallet3.sol";
 
-contract MultisigWallet2 is IMultisigWallet2, IERC721Receiver, IERC1155Receiver {
+contract MultisigWallet3 is IMultisigWallet3, IERC721Receiver, IERC1155Receiver {
     using Counters for Counters.Counter;
     using EnumerableSet for EnumerableSet.AddressSet;
-
-    /*
-     *  Constant
-     */
-    uint256 public constant MAX_OWNER_COUNT = 50;
 
     /*
      *  Storage
@@ -26,6 +21,7 @@ contract MultisigWallet2 is IMultisigWallet2, IERC721Receiver, IERC1155Receiver 
     EnumerableSet.AddressSet private owners;
     mapping(uint256 => Transaction) private transactions;
     mapping(uint256 => EnumerableSet.AddressSet) private confirmOwnerOfTx;
+    MaxRequirementType private maxRequirementType;
     uint256 private txRequirement;
 
     /*
@@ -62,13 +58,9 @@ contract MultisigWallet2 is IMultisigWallet2, IERC721Receiver, IERC1155Receiver 
     /*
      *  constructor
      */
-    constructor(address[] memory _owners, uint256 _txRequirement) {
-        if (_owners.length == 0 || _owners.length > MAX_OWNER_COUNT) {
+    constructor(address[] memory _owners) {
+        if (_owners.length < 3) {
             revert InvalidOwnerCount();
-        }
-
-        if (!_isValidTxRequirement(_txRequirement, _owners.length)) {
-            revert InvalidTxRequirement();
         }
 
         for (uint256 i = 0; i < _owners.length; i++) {
@@ -81,7 +73,8 @@ contract MultisigWallet2 is IMultisigWallet2, IERC721Receiver, IERC1155Receiver 
             owners.add(owner);
         }
 
-        txRequirement = _txRequirement;
+        maxRequirementType = MaxRequirementType.Under; // default maxRequirementType
+        txRequirement = _owners.length - 1; // default txRequirement (3 - 1)
         txIds.increment(); // set txId 1
     }
 
@@ -105,6 +98,7 @@ contract MultisigWallet2 is IMultisigWallet2, IERC721Receiver, IERC1155Receiver 
         txIds.increment();
 
         transactions[txId] = Transaction({
+            id: txId,
             to: _to,
             value: _value,
             executed: false,
@@ -130,31 +124,9 @@ contract MultisigWallet2 is IMultisigWallet2, IERC721Receiver, IERC1155Receiver 
         confirmOwnerOfTx[_txId].add(msg.sender);
 
         emit ConfirmTransaction(msg.sender, _txId);
-    }
 
-    function executeTransaction(uint256 _txId)
-        public
-        onlyOwner
-        txExists(_txId)
-        notExecuted(_txId)
-    {
-        if (!isConfirmedTx(_txId)) {
-            revert CanNotExecuteTx();
-        }
-
-        Transaction storage transaction = transactions[_txId];
-
-        transaction.executed = true;
-
-        (bool success, ) = transaction.to.call{value: transaction.value}(
-            transaction.data
-        );
-
-        if (success) {
-            emit ExecuteTransaction(msg.sender, _txId);
-        } else {
-            transaction.executed = false;
-            emit FailedTransaction(msg.sender, _txId);
+        if (isConfirmedTx(_txId)) {
+            _executeTransaction(_txId);
         }
     }
 
@@ -173,18 +145,29 @@ contract MultisigWallet2 is IMultisigWallet2, IERC721Receiver, IERC1155Receiver 
         emit RevokeConfirmation(msg.sender, _txId);
     }
 
+    function _executeTransaction(uint256 _txId) private {
+        Transaction storage transaction = transactions[_txId];
+
+        transaction.executed = true;
+
+        (bool success, ) = transaction.to.call{value: transaction.value}(
+            transaction.data
+        );
+
+        if (success) {
+            emit ExecuteTransaction(msg.sender, _txId);
+        } else {
+            transaction.executed = false;
+            emit FailedTransaction(msg.sender, _txId);
+        }
+    }
+
     /*
      *  Wallet Func
      */
     function addOwner(address _owner) public onlyWallet {
         if (_owner == address(0)) {
             revert InvalidOwner();
-        }
-
-        uint256 ownerCount = getOwnerCount() + 1;
-
-        if (ownerCount > MAX_OWNER_COUNT) {
-            revert InvalidOwnerCount();
         }
 
         if (isOwner(_owner)) {
@@ -196,7 +179,13 @@ contract MultisigWallet2 is IMultisigWallet2, IERC721Receiver, IERC1155Receiver 
     }
 
     function removeOwner(address _owner) public onlyWallet {
-        if (!_isValidTxRequirement(txRequirement, getOwnerCount() - 1)) {
+        if (
+            !_isValidTxRequirement(
+                maxRequirementType,
+                txRequirement,
+                getOwnerCount() - 1
+            )
+        ) {
             revert InvalidTxRequirement();
         }
 
@@ -228,13 +217,23 @@ contract MultisigWallet2 is IMultisigWallet2, IERC721Receiver, IERC1155Receiver 
         emit OwnerAdded(_newOwner);
     }
 
-    function changeTxRequirement(uint256 _txRequirement) public onlyWallet {
-        if (!_isValidTxRequirement(_txRequirement, getOwnerCount())) {
+    function changeTxRequirement(
+        MaxRequirementType _maxRequirementType,
+        uint256 _txRequirement
+    ) public onlyWallet {
+        if (
+            !_isValidTxRequirement(
+                _maxRequirementType,
+                _txRequirement,
+                getOwnerCount()
+            )
+        ) {
             revert InvalidTxRequirement();
         }
 
+        maxRequirementType = _maxRequirementType;
         txRequirement = _txRequirement;
-        emit TxRequirementChanged(txRequirement);
+        emit TxRequirementChanged(_maxRequirementType, _txRequirement);
     }
 
     /*
@@ -258,7 +257,7 @@ contract MultisigWallet2 is IMultisigWallet2, IERC721Receiver, IERC1155Receiver 
     }
 
     function getTxCount() public view returns (uint256) {
-        return txIds.current();
+        return txIds.current() - 1;
     }
 
     function getTxs(
@@ -337,6 +336,14 @@ contract MultisigWallet2 is IMultisigWallet2, IERC721Receiver, IERC1155Receiver 
         return confirmOwnerOfTx[_txId].values();
     }
 
+    function getMaxRequirementType()
+        external
+        view
+        returns (MaxRequirementType)
+    {
+        return maxRequirementType;
+    }
+
     function getTxRequirement() external view returns (uint256) {
         return txRequirement;
     }
@@ -345,17 +352,23 @@ contract MultisigWallet2 is IMultisigWallet2, IERC721Receiver, IERC1155Receiver 
         return address(this).balance;
     }
 
-    function _isValidTxRequirement(uint256 _txRequirement, uint256 _ownerCount)
-        private
-        pure
-        returns (bool)
-    {
+    function _isValidTxRequirement(
+        MaxRequirementType _maxRequirementType,
+        uint256 _txRequirement,
+        uint256 _ownerCount
+    ) private pure returns (bool) {
         if (_txRequirement == 0) {
             return false;
         }
 
-        if (_ownerCount < _txRequirement) {
-            return false;
+        if (_maxRequirementType == MaxRequirementType.Under) {
+            if (_ownerCount <= _txRequirement) {
+                return false;
+            }
+        } else {
+            if (_ownerCount < _txRequirement) {
+                return false;
+            }
         }
 
         return true;

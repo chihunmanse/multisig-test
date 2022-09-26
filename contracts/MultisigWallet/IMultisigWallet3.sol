@@ -2,7 +2,7 @@
 
 pragma solidity ^0.8.9;
 
-interface IMultisigWallet {
+interface IMultisigWallet3 {
     /*
      *  Event
      */
@@ -20,7 +20,10 @@ interface IMultisigWallet {
     event FailedTransaction(address indexed owner, uint256 indexed txId);
     event OwnerAdded(address indexed owner);
     event OwnerRemoved(address indexed owner);
-    event TxRequirementChanged(uint256 txRequirement);
+    event TxRequirementChanged(
+        MaxRequirementType _maxRequriementType,
+        uint256 txRequirement
+    );
 
     /*
      *  Error
@@ -32,7 +35,6 @@ interface IMultisigWallet {
     error AlreadyConfirmedTx();
     error AlreadyExistOwner();
     error DoesNotExistOwner();
-    error CanNotExecuteTx();
     error DoesNotConfirmedTx();
     error InvalidOwner();
     error InvalidOwnerCount();
@@ -40,9 +42,18 @@ interface IMultisigWallet {
     error InvalidArgument();
 
     /*
+     *  Enum
+     */
+    enum MaxRequirementType {
+        Under,
+        Equal
+    }
+
+    /*
      *  Struct
      */
     struct Transaction {
+        uint256 id;
         address to;
         uint256 value;
         bytes data;
@@ -60,8 +71,6 @@ interface IMultisigWallet {
 
     function confirmTransaction(uint256 _txId) external;
 
-    function executeTransaction(uint256 _txId) external;
-
     function revokeConfirmation(uint256 _txId) external;
 
     /*
@@ -73,12 +82,14 @@ interface IMultisigWallet {
 
     function changeOwner(address _owner, address _newOwner) external;
 
-    function changeTxRequirement(uint256 _txRequirement) external;
+    function changeTxRequirement(
+        MaxRequirementType _maxRequirementType,
+        uint256 _txRequirement
+    ) external;
 
     /*
      *  Read Func
      */
-
     function isOwner(address _owner) external view returns (bool);
 
     function getOwnerCount() external view returns (uint256);
@@ -114,6 +125,8 @@ interface IMultisigWallet {
         external
         view
         returns (address[] memory);
+
+    function getMaxRequirementType() external view returns (MaxRequirementType);
 
     function getTxRequirement() external view returns (uint256);
 

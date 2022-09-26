@@ -6,7 +6,7 @@ import { ethers, expect } from "hardhat";
 
 import { Interface } from "ethers/lib/utils";
 
-describe("MultisigWallet", () => {
+describe("MultisigWallet2", () => {
   interface Transaction {
     to: string;
     value: BigNumber;
